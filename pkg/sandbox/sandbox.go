@@ -177,6 +177,13 @@ func Run(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Options
 	sidecarCfg := sidecarConfig(sidecarName, pid, opts, p, sidecarSeccomp, ag)
 	sidecarCfg.Mounts = CredentialMounts(opts)
 
+	// In rootful mode (e.g. Kata VMs), cgroup v2 controllers are not
+	// available and setrlimit is restricted. Skip resource limits —
+	// the VM boundary provides isolation instead.
+	if rootless, err := rt.IsRootless(runCtx); err == nil && !rootless {
+		sidecarCfg.Resources.PIDLimit = 0
+	}
+
 	slog.Info("starting container sidecar")
 	err = rt.StartSidecar(runCtx, sidecarCfg)
 	if err != nil {
@@ -199,6 +206,12 @@ func Run(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Options
 		ag, mnts, agentSeccomp,
 		p.Home, rcEnv,
 	)
+
+	// Skip resource limits in rootful mode (see sidecar comment above).
+	if rootless, err := rt.IsRootless(runCtx); err == nil && !rootless {
+		agentCfg.Resources.PIDLimit = 0
+		agentCfg.Resources.UlimitCore = ""
+	}
 
 	err = rt.StartAgent(runCtx, agentCfg)
 
