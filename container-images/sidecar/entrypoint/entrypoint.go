@@ -306,12 +306,10 @@ func buildAgentChain(bin, policy string, staticIPs []string, resolver string) er
 	}
 
 	if policy == "deny" {
-		for _, cidr := range privateRanges(bin) {
-			err = iptRun(bin, "-A", "OUTPUT", "!", "-o", "lo", "-d", cidr, "-j", "DROP")
-			if err != nil {
-				return fmt.Errorf("private %s: %w", cidr, err)
-			}
-		}
+		// DNS rules BEFORE private CIDR drops — the resolver is often on
+		// a private IP (e.g. k8s CoreDNS at 10.43.0.10). Putting private
+		// CIDR drops first would block DNS before the ACCEPT fires.
+		//
 		// DNS: UDP only, rate-limited 3/s burst 5, restricted to local
 		// resolver. TCP DNS blocked entirely — eliminates DNS-over-TCP
 		// tunneling (iodine, dnscat2). Throughput drops from ~50kbps to
@@ -345,6 +343,12 @@ func buildAgentChain(bin, policy string, staticIPs []string, resolver string) er
 			"-m", "length", "--length", "512:", "-j", "DROP")
 		if err != nil {
 			return fmt.Errorf("dns response cap: %w", err)
+		}
+		for _, cidr := range privateRanges(bin) {
+			err = iptRun(bin, "-A", "OUTPUT", "!", "-o", "lo", "-d", cidr, "-j", "DROP")
+			if err != nil {
+				return fmt.Errorf("private %s: %w", cidr, err)
+			}
 		}
 		for _, dest := range staticIPs {
 			err = iptRun(bin, "-A", "OUTPUT", "-p", "tcp", "--dport", "443", "-d", dest, "-j", "ACCEPT")
