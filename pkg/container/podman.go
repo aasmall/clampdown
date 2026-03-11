@@ -24,13 +24,20 @@ func (p *Podman) StartSidecar(ctx context.Context, cfg SidecarContainerConfig) e
 	args := []string{"run", "-d", "--name", cfg.Name,
 		"--restart=unless-stopped",
 		"--read-only",
-		"--userns=keep-id",
+	}
+	// --userns=keep-id maps container uid 0 to the launcher's real uid.
+	// Only valid in rootless mode; rootful podman rejects it.
+	if rootless, err := p.IsRootless(ctx); err == nil && rootless {
+		args = append(args, "--userns=keep-id")
+	}
+	args = append(args,
 		"--user", "0:0",
 		"--cgroupns=private",
 		"--tmpfs", "/run:rw,nosuid,size=256m",
 		"--tmpfs", "/var/run:rw,nosuid,size=256m",
+		"--tmpfs", "/var/cache:rw,nosuid,size=256m",
 		"--cap-drop", "ALL",
-	}
+	)
 
 	for _, cap := range cfg.Capabilities {
 		args = append(args, "--cap-add", cap)
@@ -101,14 +108,18 @@ func (p *Podman) StartSidecar(ctx context.Context, cfg SidecarContainerConfig) e
 }
 
 func (p *Podman) StartAgent(ctx context.Context, cfg AgentContainerConfig) error {
-	args := []string{"run", "--rm", "-ti", "--name", cfg.Name,
-		"--userns=keep-id",
-		"--network", "container:" + cfg.SidecarName,
+	args := []string{"run", "--rm", "-ti", "--name", cfg.Name}
+	// --userns=keep-id only valid in rootless mode.
+	if rootless, err := p.IsRootless(ctx); err == nil && rootless {
+		args = append(args, "--userns=keep-id")
+	}
+	args = append(args,
+		"--network", "container:"+cfg.SidecarName,
 		"--cap-drop=ALL",
 		"--read-only",
 		"--security-opt", "no-new-privileges",
-		"--security-opt", "seccomp=" + cfg.SeccompProfile,
-	}
+		"--security-opt", "seccomp="+cfg.SeccompProfile,
+	)
 
 	if cfg.Resources.Memory != "" {
 		args = append(args, "--memory="+cfg.Resources.Memory)
